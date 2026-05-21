@@ -2015,6 +2015,17 @@ if(!result){
 
 <img src="https://img-blog.csdnimg.cn/20190405172522761.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L01PVV9JVA==,size_16,color_FFFFFF,t_70" alt="img" style="zoom:80%;float:left" />
 
+```
+//每个基类子对象都有自己的 vptr。
+//Derived 新增的虚函数 f3 通常添加到第一个基类（Base1）的 vtable 末尾。
+Derived 对象:
+[ Base1::vptr ]   ← 指向 Derived 为 Base1 准备的 vtable 部分
+[ Base1::x     ]
+[ Base2::vptr ]   ← 指向 Derived 为 Base2 准备的 vtable 部分
+[ Base2::y     ]
+[ z            ]
+```
+
 **向上类型转换：**upcast，把派生类的指针或引用转换成基类的指针或者引用是安全的（或者说基类指针指向派生类）；因为用转换后的指针只能访问基类部分的函数时候，都可以访问，肯定安全。这个是隐式转换，c++认为是安全的。
 
 **向下类型转换：**downcast，把基类指针或引用转换成派生类表示（或者说把派生类指针指向基类）时，由于没有动态类型检查，所以是不安全的。如果转换后的指针访问派生类新增加的函数，这个时候基类中本来没有这个函数，那就会出错。
@@ -2023,7 +2034,7 @@ if(!result){
 
 ### 四种强制类型转换
 
-1. **static_cast**
+1. **static_cast**(隐式转换)
 
    用于基本数据类型之间的转换
 
@@ -2031,15 +2042,16 @@ if(!result){
 
    子类对象的指针转换成父类对象指针
 
-   以上三个都是隐式转换，最好吧所有隐式转换都用static_cast代替
+   以上三个都是隐式转换，最好吧**所有隐式转换都用static_cast代替**
 
-2. **dynamic_cast**
+2. **dynamic_cast**（安全的向下转换-指针/引用）
+> 声明一个对象为基类类型，实际指向子类。但要通过此对象调用子类的方法时（开发者知道这个基类使用确切的子类实例化的时候）
 
    只用于对象的指针和引用，主要用于执行“安全的向下转型”，因为downcast是不安全的
 
    dynamic_cast是唯一一个在运行时处理的，因为我们转换后的指针如果请求一块无效的内存的话是会报错的，但是用该强转后会返回null，即转换成功会返回引用或者指针，失败返回null。如果一个引用类型执行了类型转换并且这个转换是不可能的，运行时一个`bad_cast`的异常类型会被抛出：
 
-3. **const_cast**
+3. **const_cast**（去除指针或引用的常量性）
 
    const_cast转换符是用来移除const或volatile属性。一般用于强制消除对象的常量性。而*C*不提供消除*const*的机制（已验证）。
 
@@ -2047,7 +2059,26 @@ if(!result){
 
    指向常量的指针被转化成非常量指针，并且仍然指向原来的对象；常量引用被转换成非常量引用，并且仍然指向原来的对象；常量对象被转换成非常量对象。
 
-4. **reinterpret_cast**
+> 因为有些成员函数逻辑上不应该修改对象，但开发者忘记（或无法）把它声明为 const。 此时如果你有一个 const 对象或 const 引用，就无法直接调用这个函数；而你又知道该函数实际上不会修改任何成员，就可以用 const_cast 临时去掉 const 来调用它，从而保持外部的 const 语义安全。
+```c++
+// 来自某个库，本应为 const，但未加
+class Logger {
+public:
+    void print() const;   // 正确：const 成员
+    void flush();         // 修改了缓冲区，非 const
+    int getCount() { return count_; }  // 逻辑上只读，但忘写 const
+private:
+    int count_ = 0;
+};
+
+void showCount(const Logger& log) {
+    // log.getCount();  // 编译错误：const 对象不能调用非 const 成员
+    // 但你知道 getCount() 并不会修改对象
+    int n = const_cast<Logger&>(log).getCount();  // 安全：实际无修改
+    std::cout << n;
+}
+```
+4. **reinterpret_cast**(任意类型转换成指针/引用/算数类型)
 
    `reinpreter_cast<type-id> (expression)`
 
@@ -2057,7 +2088,7 @@ if(!result){
    
    底层实现是从一个指针到别的指针的值的二进制拷贝。
 
-### 为什么要引入四种强制类型转换
+### 为什么要引入四种强制类型转换(让代码严谨规范)
 
 > c语言可以在任意类型之间进行转换，但是有一点就是不安全。可能会不经意间将指向const对象的指针转换成非const对象的指针，也有可能将基类对象指针转换成派生类对象的指针。因此这四种强制类型转换是的代码更加严谨规范
 
@@ -2069,38 +2100,16 @@ if(!result){
 
 
 
-## RAII基本理解与使用
-
-**基本概念：**RAII是c++中的一个惯用法，即“Resource Acquisition Is Initialization”，翻译为“资源获取就初始化”。是一种资源管理技术。c++之父说这种技术是依赖于类中构造函数和析构函数的性质以及与异常处理的交互性质来管理资源。
-
-**提出原因：**首先要明确在计算机系统中，资源的数量是有限的，一定要合理管理和使用有限的资源。比如内存，文件，套接字等等吧。因此在使用资源的时候要遵循三个步骤：
-
-1. 获取资源
-2. 使用资源
-3. 释放资源
-
-正常情况下没什么问题，大家都非常规规矩矩的这样做。但是我们都知道程序员很懒，一般不喜欢干重复性很高的工作，因此有两种情况下会出现一些问题。第一种比如说对文件操作，考虑一种极端情况，各种if判断后都要释放资源，也就是说释放资源的语句要写很多次，这样是非常麻烦的。第二种情况就是在使用资源的过程中程序会抛出异常，我们必须用catch来捕获所有异常然后关闭文件，当控制流程特别复杂的时候就很烦，代码很臃肿。而且有时候释放资源的语句就不会被执行。那么有些资源就是放不掉，因此Bjarne Stroustrup就想到不管啥情况都能释放资源的就是析构函数，因为stack unwinding（栈展开）导致析构函数能被执行。因此将资源的初始化和释放都放到一个类中就能解决上面遇到的问题。
-
-stack winding:When program run, each function(data, registers, program counter, etc) is mapped onto the stack as it is called. Because the function calls other functions, they too are mapped onto the stack. This is stack winding.
-
-stack unwinding:Unwinding is the removal of the functions from the stack in the reverse order.(展开是以相反的顺序从堆栈中删除函数)。在c++中，系统必须确保调用所有创建起来的局部对象的析构函数。
-
-**总结：**在构造函数中申请分配资源，在析构函数中释放资源。因为C++的语言机制保证了，当一个对象创建的时候，自动调用构造函数，当对象超出作用域的时候会自动调用析构函数。所以，在RAII的指导下，我们应该使用类来管理资源，将资源和对象的生命周期绑定。**RAII的核心思想是将资源或者状态与对象的生命周期绑定，通过C++的语言机制，实现资源和状态的安全管理,智能指针是RAII最好的例子**。
-
-> RALL是c++区别于其他所有编程语言的重要特性。最初学习c++时的教条是new和delete一定要配套使用，但是使用RALL思想后，改成每一个资源配置动作都应该在单一语句执行，获得资源后立刻交给对象去管理，一般不要出现delete，用智能指针。
-
-
-
 ## C++11的enum class 、enum struct 和 enum
 
 枚举类型(enumeration)使我们可以将一组整型常量组织在一起。每个枚举类型定义了一种新的类型。枚举属于字面值常量类型。
 
-- 旧版本enum存在的问题
+- 旧版本enum存在的问题（转换、大小、作用域）
   1. 没有非常完全的类型安全。即不同枚举之间不能赋值，同时整形不能向枚举类型转换，但是枚举可以向整形转。
   2. 无法确定数据的类型，导致无法明确枚举类型所占用的内存大小。
   3. 枚举中的成员可以在括号外部直接访问，而不需要使用域运算符。
 
-- enum class 、enum struct 
+- enum class 、enum struct （强类型枚举）
 
   有更好的类型安全和封装的特性。
 
@@ -2108,7 +2117,14 @@ stack unwinding:Unwinding is the removal of the functions from the stack in the 
   2. 可以指定底层的数据类型，默认是int
   3. 需要通过域运算符来访问枚举成员
 
+```c++
+enum class Color2 { Red, Green, Blue }; //默认int
+Color2 c = Color2::Red;   // 必须加作用域
 
+//指定底层类型
+enum class SmallEnum : unsigned char { A, B, C };   // 占用1字节
+enum class BigEnum : long long { X = 1LL << 40 };   // 大范围值
+```
 
 ## **内存泄漏？出现内存泄漏如何调试？**
 
@@ -2134,7 +2150,7 @@ stack unwinding:Unwinding is the removal of the functions from the stack in the 
 
 
 
-##   :watermelon:C++11新特性
+## C++11新特性
 
 [参考链接](https://subingwen.cn/cplusplus/)
 
@@ -2147,23 +2163,36 @@ auto和decltype都是c++11新增的关键字，都用于自动类型推到，但
   auto的出现有对我的代码来说两个作用：
 
   1. 为了避免太长的类型描述影响代码可读性。比如`std::vector<MyType>::iterator it =  myArray.begin();  `
-  2. 这个类型不是我们所关注的，也会用。比如遍历容器中的值，用到
+  2. 这个类型不是我们所关注的，也会用。比如遍历容器中的值
 
-  auto自动帮我们获得定义变量的类型所以auto定义的变量必须有初始值。
+  > auto自动帮我们获得定义变量的类型所以auto定义的变量必须有初始值。
 
-  auto可以推断基本类型，也可以推断引用类型，当推断引用类型时候，将引用对象的类型作为推断类型（重要）
+  > auto可以推断基本类型，也可以推断引用类型，当推断引用类型时候，将引用对象的类型作为推断类型（重要）去引用去const。除非显式给auto加&
 
-  auto的自动类型推断发生在编译期，所以使用auto并不会造成程序运行时效率的降低。
+  > auto的自动类型推断发生在编译期，所以使用auto并不会造成程序运行时效率的降低。
 
-  编译器可以根据初始值自动推导出类型。但是不能用于函数传参以及数组类型的推导
+  > 编译器可以根据初始值自动推导出类型。但是不能用于函数传参以及数组类型的推导
 
-- **decltype**
+```c++
+int x = 10;
+const int cx = x;
+const int& rx = x;   // rx 引用 x（x 非 const）
+
+auto a = x;     // a 的类型: int (忽略引用和顶层 const)
+auto b = cx;    // b 的类型: int (顶层 const 被去掉)
+auto c = rx;    // c 的类型: int (引用被忽略, 且 const 被去掉)
+
+auto d = &x;    // d: int* (指针类型不变)
+auto e = &cx;   // e: const int* (底层 const 保留)
+```
+
+- **decltype**（一般配合表达式用）
 
   一句话概括，当你需要某个表达式的返回值类型而又不想实际执行它时用decltype。
 
   有时候我们想从表达式中推断出要定义的类型，不会真的求表达式的值。
 
-   `decltype`是为了解决复杂的类型声明而使用的关键字
+   `decltype`是为了**解决复杂的类型声明而使用的关键字**
 
   1. auto忽略顶层const，decltype保留顶层const；
   2. 对引用操作，auto推断出原有类型，decltype推断出引用；（重要）
@@ -2180,6 +2209,26 @@ auto和decltype都是c++11新增的关键字，都用于自动类型推到，但
   decltype(a+b) d; //编译期类型推导
   //不可以用auto c; 直接声明变量，必须同时初始化。
   ```
+
+## RAII基本理解与使用
+
+**基本概念：**RAII是c++中的一个惯用法，即“Resource Acquisition Is Initialization”，翻译为“资源获取就初始化”。是一种资源管理技术。c++之父说这种技术是依赖于类中构造函数和析构函数的性质以及与异常处理的交互性质来管理资源。
+
+**提出原因：**首先要明确在计算机系统中，资源的数量是有限的，一定要合理管理和使用有限的资源。比如内存，文件，套接字等等吧。因此在使用资源的时候要遵循三个步骤：
+
+1. 获取资源
+2. 使用资源
+3. 释放资源
+
+正常情况下没什么问题，大家都非常规规矩矩的这样做。但是我们都知道程序员很懒，一般不喜欢干重复性很高的工作，因此有两种情况下会出现一些问题。第一种比如说对文件操作，考虑一种极端情况，各种if判断后都要释放资源，也就是说释放资源的语句要写很多次，这样是非常麻烦的。第二种情况就是在使用资源的过程中程序会抛出异常，我们必须用catch来捕获所有异常然后关闭文件，当控制流程特别复杂的时候就很烦，代码很臃肿。而且有时候释放资源的语句就不会被执行。那么有些资源就是放不掉，因此Bjarne Stroustrup就想到不管啥情况都能释放资源的就是析构函数，因为stack unwinding（栈展开）导致析构函数能被执行。因此将资源的初始化和释放都放到一个类中就能解决上面遇到的问题。
+
+stack winding:When program run, each function(data, registers, program counter, etc) is mapped onto the stack as it is called. Because the function calls other functions, they too are mapped onto the stack. This is stack winding.
+
+stack unwinding:Unwinding is the removal of the functions from the stack in the reverse order.(展开是以相反的顺序从堆栈中删除函数)。在c++中，系统必须确保调用所有创建起来的局部对象的析构函数。
+
+**总结：**在构造函数中申请分配资源，在析构函数中释放资源。因为C++的语言机制保证了，当一个对象创建的时候，自动调用构造函数，当对象超出作用域的时候会自动调用析构函数。所以，在RAII的指导下，我们应该使用类来管理资源，将资源和对象的生命周期绑定。**RAII的核心思想是将资源或者状态与对象的生命周期绑定，通过C++的语言机制，实现资源和状态的安全管理,智能指针是RAII最好的例子**。
+
+> RALL是c++区别于其他所有编程语言的重要特性。最初学习c++时的教条是new和delete一定要配套使用，但是使用RALL思想后，改成每一个资源配置动作都应该在单一语句执行，获得资源后立刻交给对象去管理，一般不要出现delete，用智能指针。
 
 
 
@@ -2205,6 +2254,194 @@ https://aijishu.com/a/1060000000286819
 原因1：内存泄露，即new和delete不匹配
 
 原因2：多线程下对象析构问题，造成这个问题本质的原因是类对象自己销毁(析构)的时候无法对自己加锁,所以要独立出来,采用这个中间层(shared_ptr).
+
+独占的智能指针
+```c++
+#include <utility>   // std::swap, std::move
+
+template<typename T>
+class SimpleUniquePtr {
+private:
+    T* ptr_;
+
+public:
+    // 构造函数
+    explicit SimpleUniquePtr(T* p = nullptr) noexcept : ptr_(p) {}
+
+    // 析构函数
+    ~SimpleUniquePtr() {
+        delete ptr_;
+    }
+
+    // 禁止拷贝
+    SimpleUniquePtr(const SimpleUniquePtr&) = delete;
+    SimpleUniquePtr& operator=(const SimpleUniquePtr&) = delete;
+
+    // 移动构造
+    SimpleUniquePtr(SimpleUniquePtr&& other) noexcept : ptr_(other.ptr_) {
+        other.ptr_ = nullptr;
+    }
+
+    // 移动赋值
+    SimpleUniquePtr& operator=(SimpleUniquePtr&& other) noexcept {
+        if (this != &other) {
+            delete ptr_;           // 释放原有资源
+            ptr_ = other.ptr_;     // 转移所有权
+            other.ptr_ = nullptr;
+        }
+        return *this;
+    }
+
+    // 重载 operator* 和 operator->
+    T& operator*() const { return *ptr_; }
+    T* operator->() const { return ptr_; }
+
+    // 获取原始指针
+    T* get() const noexcept { return ptr_; }
+
+    // 释放所有权（返回原始指针，不再管理）
+    T* release() noexcept {
+        T* tmp = ptr_;
+        ptr_ = nullptr;
+        return tmp;
+    }
+
+    // 重置所管理的指针
+    void reset(T* p = nullptr) noexcept {
+        delete ptr_;
+        ptr_ = p;
+    }
+
+    // 检查是否为空
+    explicit operator bool() const noexcept { return ptr_ != nullptr; }
+
+    // 交换
+    void swap(SimpleUniquePtr& other) noexcept {
+        std::swap(ptr_, other.ptr_);
+    }
+};
+
+SimpleUniquePtr<int> p1(new int(42));
+SimpleUniquePtr<int> p2 = std::move(p1);   // 所有权转移
+if (p2) std::cout << *p2;                 // 输出 42
+```
+
+共享智能指针
+```c++
+#include <atomic>   // 可选，若需要线程安全则用 atomic
+#include <utility>
+
+template<typename T>
+class SimpleSharedPtr {
+private:
+    T* ptr_;                // 指向被管理的对象
+    unsigned int* count_;   // 指向引用计数（堆上分配）
+
+public:
+    // 构造函数：管理一个动态对象
+    explicit SimpleSharedPtr(T* p = nullptr)
+        : ptr_(p), count_(nullptr)
+    {
+        if (ptr_) {
+            count_ = new unsigned int(1);
+        }
+    }
+
+    // 拷贝构造：增加引用计数
+    SimpleSharedPtr(const SimpleSharedPtr& other)
+        : ptr_(other.ptr_), count_(other.count_)
+    {
+        if (count_) {
+            ++(*count_);
+        }
+    }
+
+    // 拷贝赋值
+    SimpleSharedPtr& operator=(const SimpleSharedPtr& other) {
+        if (this != &other) {
+            // 先减少当前对象的引用计数，必要时释放
+            release();
+
+            // 复制 other 的数据
+            ptr_ = other.ptr_;
+            count_ = other.count_;
+            if (count_) {
+                ++(*count_);
+            }
+        }
+        return *this;
+    }
+
+    // 移动构造：直接转移，不修改计数
+    SimpleSharedPtr(SimpleSharedPtr&& other) noexcept
+        : ptr_(other.ptr_), count_(other.count_)
+    {
+        other.ptr_ = nullptr;
+        other.count_ = nullptr;
+    }
+
+    // 移动赋值
+    SimpleSharedPtr& operator=(SimpleSharedPtr&& other) noexcept {
+        if (this != &other) {
+            release();                // 释放当前资源
+            ptr_ = other.ptr_;
+            count_ = other.count_;
+            other.ptr_ = nullptr;
+            other.count_ = nullptr;
+        }
+        return *this;
+    }
+
+    // 析构函数
+    ~SimpleSharedPtr() {
+        release();
+    }
+
+    // 解引用操作
+    T& operator*() const { return *ptr_; }
+    T* operator->() const { return ptr_; }
+
+    T* get() const noexcept { return ptr_; }
+
+    // 获取当前引用计数
+    unsigned int use_count() const noexcept {
+        return count_ ? *count_ : 0;
+    }
+
+    // 重置
+    void reset(T* p = nullptr) {
+        release();          // 释放当前管理的对象
+        ptr_ = p;
+        count_ = p ? new unsigned int(1) : nullptr;
+    }
+
+    // 检查是否为空
+    explicit operator bool() const noexcept { return ptr_ != nullptr; }
+
+private:
+    void release() {
+        if (count_) {
+            --(*count_);
+            if (*count_ == 0) {
+                delete ptr_;
+                delete count_;
+            }
+        }
+        ptr_ = nullptr;
+        count_ = nullptr;
+    }
+};
+
+SimpleSharedPtr<int> sp1(new int(100));
+SimpleSharedPtr<int> sp2 = sp1;      // 引用计数变为2
+std::cout << *sp1 << ", count=" << sp1.use_count();  // 100, count=2
+```
+
+> 线程安全：上述 SimpleSharedPtr 的引用计数是普通 unsigned int*，非线程安全。若要用于多线程，应将 count_ 改为 std::atomic<unsigned int>*，并对所有访问使用原子操作。
+
+> 定制删除器：真实 std::unique_ptr / std::shared_ptr 支持自定义删除器，这里为简化未实现。
+
+> 数组支持：简单实现没有特化数组版本（delete[]）。实际生产环境建议使用 std::unique_ptr<T[]> 或 std::shared_ptr<T[]>（C++17 起支持）。
 
 #### auto_ptr
 
