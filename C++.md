@@ -3261,6 +3261,10 @@ void swap(Type& x, Type& y) noexcept  //C++11
 
 #### =default
 
+> 没显式声明不用写，用默认的
+> 显式声明定义用默认的不想写，用=default
+> 
+
 如果一个 C++ 类没有显式地给出构造函数、析构函数、拷贝构造函数、operator = 这几类函数的实现，在需要它们时，编译器会自动生成；或者，在给出这些函数的声明时，如果没有给出其实现，编译器在链接时就会报错。=default 如果标记这类函数，编译器会给出默认实现。
 
 =default 笔者觉得最大的作用就是，在开发中简化了那些构造函数中没有实际的初始化代码的写法，尤其是声明和实现分别属于一个 .h 和 .cpp 文件。
@@ -3271,13 +3275,23 @@ void swap(Type& x, Type& y) noexcept  //C++11
 
 #### using
 
-一般的using关键子我们都是用来声明当前文件的命名空间，比如标准库的命名空间std-> using namespace std;
+一般的using关键字我们都是用来声明当前文件的命名空间，比如标准库的命名空间std-> using namespace std;
 
 但在c++11中，它的用处还有几个 :
 
 1. 取代typedef 
 2. 让父类同名函数在子类中以重载方式使用
+```c++
+// typedef
+typedef unsigned int uint;
+typedef int* IntPtr;
+typedef void (*FuncPtr)(int);   // 函数指针
 
+// using (等价的别名声明)
+using uint = unsigned int;
+using IntPtr = int*;
+using FuncPtr = void(*)(int);
+```
 
 
 ## 实现一个引用计数功能？c++中共享指针是怎样计数的？
